@@ -2,11 +2,14 @@ import { FeatureItem, TaskItem, TaskKind } from '../types/spec';
 
 /**
  * Re-orders and renumbers project tasks:
- * 1. Groups by kind: all 'prototype' first, then all 'functional'.
- * 2. Within each group: by the order of features in the project.
- * 3. Within the same feature: preserves the original relative order.
- * 4. Renumbers sequentially (T001, T002...) updating task.code,
- *    task.markdown (header, dependsOn line, code references), and dependsOn array.
+ * 1. Resolves `dependsOn` (which initially uses temporary codes like "T001" per feature)
+ *    to unique task IDs by looking first in the SAME feature, then in other features.
+ * 2. Groups by kind: all 'prototype' first, then all 'functional'.
+ * 3. Within each group: by the order of features in the project.
+ * 4. Within the same feature: preserves the original relative order.
+ * 5. Renumbers sequentially (T001, T002...), mapping dependency IDs to the new codes.
+ * 6. Updates task.code, task.dependsOn, and markdown (header # T00X — and **Depende de:** line)
+ *    without chained string replacements that corrupt markdown.
  */
 export function renumberTasks(
   projectOrTasks: { tasks: TaskItem[]; features: FeatureItem[] } | TaskItem[],
@@ -19,11 +22,57 @@ export function renumberTasks(
     tasks = projectOrTasks;
     features = maybeFeatures || [];
   } else {
-    tasks = projectOrTasks.tasks || [];
-    features = projectOrTasks.features || [];
+    tasks = projectOrTasks?.tasks || [];
+    features = projectOrTasks?.features || [];
   }
 
   if (!tasks || tasks.length === 0) return [];
+
+  // Ensure every task has a defined id, normalized kind, and copy of dependsOn
+  const tasksWithId = tasks.map((task, idx) => ({
+    ...task,
+    id: task.id || `task_${idx}_${task.code || 'code'}`,
+    kind: (task.kind === 'prototype' ? 'prototype' : 'functional') as TaskKind,
+    dependsOn: Array.isArray(task.dependsOn) ? [...task.dependsOn] : [],
+  }));
+
+  // Step 1: Map each task's dependsOn references to task IDs before sorting.
+  // Search first in the SAME feature; only if not found, in other features.
+  const tasksWithDepIds = tasksWithId.map((t) => {
+    const dependencyIds: string[] = (t.dependsOn || []).map((dep) => {
+      if (!dep) return dep;
+
+      // If dep already matches an existing task id directly
+      const byId = tasksWithId.find((other) => other.id === dep);
+      if (byId) return byId.id;
+
+      const depClean = dep.trim().toUpperCase();
+
+      // 1. Search in the SAME feature
+      const sameFeature = tasksWithId.find(
+        (other) =>
+          other.featureSlug === t.featureSlug &&
+          other.id !== t.id &&
+          other.code.trim().toUpperCase() === depClean
+      );
+      if (sameFeature) return sameFeature.id;
+
+      // 2. Search in other features
+      const otherFeature = tasksWithId.find(
+        (other) =>
+          other.id !== t.id &&
+          other.code.trim().toUpperCase() === depClean
+      );
+      if (otherFeature) return otherFeature.id;
+
+      return dep;
+    });
+
+    return {
+      task: t,
+      dependencyIds,
+    };
+  });
 
   // Create map of featureSlug -> feature order index
   const featureOrderMap = new Map<string, number>();
@@ -31,20 +80,15 @@ export function renumberTasks(
     featureOrderMap.set(feat.slug, index);
   });
 
-  // Map each task with sorting weights
-  const indexedTasks = tasks.map((task, originalIndex) => {
-    const kind: TaskKind = task.kind === 'prototype' ? 'prototype' : 'functional';
-    const kindPriority = kind === 'prototype' ? 0 : 1;
-    const featureOrder = featureOrderMap.has(task.featureSlug)
-      ? featureOrderMap.get(task.featureSlug)!
+  // Step 2: Prepare indexed tasks for sorting
+  const indexedTasks = tasksWithDepIds.map((item, originalIndex) => {
+    const kindPriority = item.task.kind === 'prototype' ? 0 : 1;
+    const featureOrder = featureOrderMap.has(item.task.featureSlug)
+      ? featureOrderMap.get(item.task.featureSlug)!
       : 9999;
 
     return {
-      task: {
-        ...task,
-        kind,
-        dependsOn: Array.isArray(task.dependsOn) ? [...task.dependsOn] : [],
-      } as TaskItem,
+      ...item,
       originalIndex,
       kindPriority,
       featureOrder,
@@ -62,46 +106,51 @@ export function renumberTasks(
     return a.originalIndex - b.originalIndex;
   });
 
-  const sortedTasks = indexedTasks.map((item) => ({ ...item.task }));
-
-  // Create code mapping from old codes to new codes (e.g. T004 -> T002)
-  const codeMap = new Map<string, string>();
-  sortedTasks.forEach((task, idx) => {
+  // Step 3: Create mapping of task.id -> newCode (T001, T002...)
+  const idToNewCodeMap = new Map<string, string>();
+  indexedTasks.forEach((item, idx) => {
     const newCode = `T${String(idx + 1).padStart(3, '0')}`;
-    codeMap.set(task.code.toUpperCase(), newCode);
+    idToNewCodeMap.set(item.task.id, newCode);
   });
 
-  // Update each task with new sequential code, updated dependsOn, and updated markdown
-  return sortedTasks.map((task, idx) => {
-    const oldCode = task.code;
+  // Step 4: Build final tasks with updated codes, dependsOn, and markdown
+  return indexedTasks.map((item, idx) => {
+    const task = item.task;
     const newCode = `T${String(idx + 1).padStart(3, '0')}`;
 
-    // Map old dependsOn references to new sequential codes
-    const newDependsOn = (task.dependsOn || []).map((dep) => {
-      const depUpper = dep.trim().toUpperCase();
-      return codeMap.get(depUpper) || dep;
+    // Convert dependency IDs to new sequential codes
+    const finalDependsOn = item.dependencyIds.map((depId) => {
+      return idToNewCodeMap.get(depId) || depId;
     });
 
     let newMarkdown = task.markdown || '';
     const tipoLabel = task.kind === 'prototype' ? 'Protótipo visual' : 'Funcional';
-
-    // Replace header: # T00X — Title
-    newMarkdown = newMarkdown.replace(
-      /^#\s*T\d{3,4}\s*—/m,
-      `# ${newCode} —`
-    );
-
-    // Replace/Ensure Tipo and Depende de lines right below Feature line
     const dependsText =
-      newDependsOn.length > 0 ? newDependsOn.join(', ') : 'Nenhuma (tarefa inicial)';
+      finalDependsOn.length > 0 ? finalDependsOn.join(', ') : 'Nenhuma (tarefa inicial)';
 
+    // Rewrite header "# T00X —" with the new code
+    if (/^#\s*T\d{3,4}\s*—/m.test(newMarkdown)) {
+      newMarkdown = newMarkdown.replace(/^#\s*T\d{3,4}\s*—/m, `# ${newCode} —`);
+    } else if (/^#\s*T\d{3,4}\b/m.test(newMarkdown)) {
+      newMarkdown = newMarkdown.replace(/^#\s*T\d{3,4}\b/m, `# ${newCode}`);
+    } else if (!/^#\s+/m.test(newMarkdown)) {
+      newMarkdown = `# ${newCode} — ${task.title}\n\n` + newMarkdown;
+    }
+
+    // Strip out previous Tipo and Depende de lines to avoid duplication
     newMarkdown = newMarkdown.replace(/^\*\*Tipo:\*\*[^\n]*\n?/gm, '');
     newMarkdown = newMarkdown.replace(/^\*\*Depende de:\*\*[^\n]*\n?/gm, '');
 
+    // Insert Tipo and Depende de right below **Feature:** if present, or below header
     if (/\*\*Feature:\*\*([^\n]*)/i.test(newMarkdown)) {
       newMarkdown = newMarkdown.replace(
         /(\*\*Feature:\*\*[^\n]*)/i,
         `$1\n**Tipo:** ${tipoLabel}\n**Depende de:** ${dependsText}`
+      );
+    } else if (/^(#\s*[^\n]+\n)/m.test(newMarkdown)) {
+      newMarkdown = newMarkdown.replace(
+        /^(#\s*[^\n]+\n)/m,
+        `$1**Tipo:** ${tipoLabel}\n**Depende de:** ${dependsText}\n`
       );
     } else {
       newMarkdown = `**Tipo:** ${tipoLabel}\n**Depende de:** ${dependsText}\n\n` + newMarkdown;
@@ -113,23 +162,17 @@ export function renumberTasks(
       '## Arquivos prováveis (confirmar no /plan)'
     );
 
-    // Replace any references to other old task codes inside markdown
-    codeMap.forEach((replacement, orig) => {
-      if (orig !== oldCode.toUpperCase()) {
-        const regex = new RegExp(`\\b${orig}\\b`, 'g');
-        newMarkdown = newMarkdown.replace(regex, replacement);
-      }
-    });
-
     // Ensure "## Plano de implementação" at the end
     if (!/##\s*Plano de implementação/i.test(newMarkdown)) {
-      newMarkdown = newMarkdown.trim() + '\n\n## Plano de implementação\n_A ser preenchido pelo comando /plan dentro da IDE._\n';
+      newMarkdown =
+        newMarkdown.trim() +
+        '\n\n## Plano de implementação\n_A ser preenchido pelo comando /plan dentro da IDE._\n';
     }
 
     return {
       ...task,
       code: newCode,
-      dependsOn: newDependsOn,
+      dependsOn: finalDependsOn,
       markdown: newMarkdown,
     };
   });
