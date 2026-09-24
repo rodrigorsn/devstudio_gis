@@ -8,8 +8,12 @@ import {
   TaskItem,
   ADRItem,
   STAGES_LIST,
+  SkillItem,
 } from '../types/spec';
 import { createDemoProject, createEmptyProject, parseStatusMd } from '../utils/demoData';
+import { renumberTasks, reorderAndRenumberTasks } from '../utils/taskRenumbering';
+import { generateTelasMarkdown } from '../utils/telasGenerator';
+import { DEFAULT_DEMO_SKILLS } from '../utils/exportTemplates';
 
 const LOCAL_STORAGE_KEY = 'spec_studio_project_v2';
 
@@ -25,9 +29,14 @@ interface ProjectContextValue {
   clearStageChat: (stageId: StageId) => void;
   // Document
   updateStageDocument: (stageId: StageId, content: string) => void;
+  updateAgentsMd: (content: string) => void;
+  // Skills
+  setSkillsList: (skills: SkillItem[]) => void;
+  updateSkill: (slug: string, data: Partial<SkillItem>) => void;
   // Features (Stage 4)
   setFeaturesList: (features: FeatureItem[]) => void;
   updateFeature: (featureId: string, data: Partial<FeatureItem>) => void;
+  updateFeaturePages: (featureId: string, pages: any[]) => void;
   addFeature: (feature: FeatureItem) => void;
   removeFeature: (featureId: string) => void;
   reorderFeatures: (startIndex: number, endIndex: number) => void;
@@ -62,13 +71,33 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     try {
       const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (parsed && Array.isArray(parsed.features)) {
+          parsed.features = parsed.features.map((f: any) => ({
+            ...f,
+            pages: Array.isArray(f.pages) ? f.pages : [],
+          }));
+        }
+        if (parsed && Array.isArray(parsed.tasks)) {
+          parsed.tasks = parsed.tasks.map((task: any) => ({
+            ...task,
+            kind: task.kind === 'prototype' ? 'prototype' : 'functional',
+            dependsOn: Array.isArray(task.dependsOn) ? task.dependsOn : [],
+          }));
+          parsed.tasks = renumberTasks(parsed);
+        }
+        if (parsed && (!Array.isArray(parsed.skills) || parsed.skills.length === 0)) {
+          parsed.skills = DEFAULT_DEMO_SKILLS;
+        }
+        return parsed;
       }
     } catch (e) {
       console.error('Failed to load project from localStorage:', e);
     }
     // Start with demo project so user sees a rich working project immediately, or can reset
-    return createDemoProject();
+    const demo = createDemoProject();
+    demo.tasks = renumberTasks(demo);
+    return demo;
   });
 
   // Sync to localStorage
@@ -263,39 +292,104 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
   };
 
-  // Features
-  const setFeaturesList = (features: FeatureItem[]) => {
+  const updateAgentsMd = (content: string) => {
     setProject((prev) => ({
       ...prev,
-      features,
-      selectedFeatureId: features[0]?.id || prev.selectedFeatureId,
+      agentsMd: content,
       updatedAt: Date.now(),
     }));
+  };
+
+  const setSkillsList = (skills: SkillItem[]) => {
+    setProject((prev) => ({
+      ...prev,
+      skills,
+      updatedAt: Date.now(),
+    }));
+  };
+
+  const updateSkill = (slug: string, data: Partial<SkillItem>) => {
+    setProject((prev) => {
+      const skills = [...(prev.skills || [])];
+      const index = skills.findIndex((s) => s.slug === slug);
+      if (index >= 0) {
+        skills[index] = { ...skills[index], ...data };
+      }
+      return {
+        ...prev,
+        skills,
+        updatedAt: Date.now(),
+      };
+    });
+  };
+
+  // Features
+  const setFeaturesList = (features: FeatureItem[]) => {
+    setProject((prev) => {
+      const renumberedTasks = reorderAndRenumberTasks(prev.tasks, features);
+      return {
+        ...prev,
+        features,
+        tasks: renumberedTasks,
+        selectedFeatureId: features[0]?.id || prev.selectedFeatureId,
+        updatedAt: Date.now(),
+      };
+    });
   };
 
   const updateFeature = (featureId: string, data: Partial<FeatureItem>) => {
     setProject((prev) => ({
       ...prev,
-      features: prev.features.map((f) => (f.id === featureId ? { ...f, ...data } : f)),
+      features: prev.features.map((f) => {
+        if (f.id !== featureId) return f;
+        const updated = { ...f, ...data };
+        if (data.pages && !data.screensMarkdown) {
+          updated.screensMarkdown = generateTelasMarkdown(data.pages, updated.title);
+        }
+        return updated;
+      }),
+      updatedAt: Date.now(),
+    }));
+  };
+
+  const updateFeaturePages = (featureId: string, pages: any[]) => {
+    setProject((prev) => ({
+      ...prev,
+      features: prev.features.map((f) => {
+        if (f.id !== featureId) return f;
+        return {
+          ...f,
+          pages,
+          screensMarkdown: generateTelasMarkdown(pages, f.title),
+        };
+      }),
       updatedAt: Date.now(),
     }));
   };
 
   const addFeature = (feature: FeatureItem) => {
-    setProject((prev) => ({
-      ...prev,
-      features: [...prev.features, feature],
-      selectedFeatureId: feature.id,
-      updatedAt: Date.now(),
-    }));
+    setProject((prev) => {
+      const newFeatures = [...prev.features, feature];
+      const renumberedTasks = reorderAndRenumberTasks(prev.tasks, newFeatures);
+      return {
+        ...prev,
+        features: newFeatures,
+        tasks: renumberedTasks,
+        selectedFeatureId: feature.id,
+        updatedAt: Date.now(),
+      };
+    });
   };
 
   const removeFeature = (featureId: string) => {
     setProject((prev) => {
       const updated = prev.features.filter((f) => f.id !== featureId);
+      const remainingTasks = prev.tasks.filter((t) => t.featureSlug !== prev.features.find((f) => f.id === featureId)?.slug);
+      const renumberedTasks = reorderAndRenumberTasks(remainingTasks, updated);
       return {
         ...prev,
         features: updated,
+        tasks: renumberedTasks,
         selectedFeatureId: updated[0]?.id,
         updatedAt: Date.now(),
       };
@@ -307,9 +401,11 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const list = [...prev.features];
       const [removed] = list.splice(startIndex, 1);
       list.splice(endIndex, 0, removed);
+      const renumberedTasks = reorderAndRenumberTasks(prev.tasks, list);
       return {
         ...prev,
         features: list,
+        tasks: renumberedTasks,
         updatedAt: Date.now(),
       };
     });
@@ -317,38 +413,49 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Tasks
   const setTasksList = (tasks: TaskItem[]) => {
-    setProject((prev) => ({
-      ...prev,
-      tasks,
-      selectedTaskId: tasks[0]?.id || prev.selectedTaskId,
-      updatedAt: Date.now(),
-    }));
+    setProject((prev) => {
+      const renumberedTasks = reorderAndRenumberTasks(tasks, prev.features);
+      return {
+        ...prev,
+        tasks: renumberedTasks,
+        selectedTaskId: renumberedTasks[0]?.id || prev.selectedTaskId,
+        updatedAt: Date.now(),
+      };
+    });
   };
 
   const updateTask = (taskId: string, data: Partial<TaskItem>) => {
-    setProject((prev) => ({
-      ...prev,
-      tasks: prev.tasks.map((t) => (t.id === taskId ? { ...t, ...data } : t)),
-      updatedAt: Date.now(),
-    }));
+    setProject((prev) => {
+      const updatedList = prev.tasks.map((t) => (t.id === taskId ? { ...t, ...data } : t));
+      return {
+        ...prev,
+        tasks: updatedList,
+        updatedAt: Date.now(),
+      };
+    });
   };
 
   const addTask = (task: TaskItem) => {
-    setProject((prev) => ({
-      ...prev,
-      tasks: [...prev.tasks, task],
-      selectedTaskId: task.id,
-      updatedAt: Date.now(),
-    }));
+    setProject((prev) => {
+      const combined = [...prev.tasks, task];
+      const renumberedTasks = reorderAndRenumberTasks(combined, prev.features);
+      return {
+        ...prev,
+        tasks: renumberedTasks,
+        selectedTaskId: task.id,
+        updatedAt: Date.now(),
+      };
+    });
   };
 
   const removeTask = (taskId: string) => {
     setProject((prev) => {
       const updated = prev.tasks.filter((t) => t.id !== taskId);
+      const renumberedTasks = reorderAndRenumberTasks(updated, prev.features);
       return {
         ...prev,
-        tasks: updated,
-        selectedTaskId: updated[0]?.id,
+        tasks: renumberedTasks,
+        selectedTaskId: renumberedTasks[0]?.id,
         updatedAt: Date.now(),
       };
     });
@@ -390,14 +497,21 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
     let completedCount = 0;
     let pendingCount = 0;
 
+    project.tasks.forEach((task) => {
+      const codeUpper = task.code.toUpperCase();
+      if (completedCodes.has(codeUpper)) {
+        completedCount++;
+      } else if (pendingCodes.has(codeUpper)) {
+        pendingCount++;
+      }
+    });
+
     setProject((prev) => {
       const updatedTasks = prev.tasks.map((task) => {
         const codeUpper = task.code.toUpperCase();
         if (completedCodes.has(codeUpper)) {
-          completedCount++;
           return { ...task, completed: true };
         } else if (pendingCodes.has(codeUpper)) {
-          pendingCount++;
           return { ...task, completed: false };
         }
         return task;
@@ -421,6 +535,7 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const loadDemo = () => {
     const demo = createDemoProject();
+    demo.tasks = renumberTasks(demo);
     setProject(demo);
   };
 
@@ -443,8 +558,12 @@ export const ProjectProvider: React.FC<{ children: React.ReactNode }> = ({ child
         addChatMessage,
         clearStageChat,
         updateStageDocument,
+        updateAgentsMd,
+        setSkillsList,
+        updateSkill,
         setFeaturesList,
         updateFeature,
+        updateFeaturePages,
         addFeature,
         removeFeature,
         reorderFeatures,

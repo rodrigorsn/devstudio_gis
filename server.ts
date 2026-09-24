@@ -356,17 +356,148 @@ ${prdDoc || 'App de produtividade e desenvolvimento de software.'}`,
   }
 });
 
-// 4. Generate Wireframe HTML (Clean grayscale mockup)
+// 3.5. Generate Pages hierarchy (Page -> Components -> Behaviors)
+app.post('/api/generate-pages', async (req, res) => {
+  try {
+    const {
+      featureSlug,
+      featureTitle,
+      featureSpec,
+      architectureDoc,
+      adrsDocs,
+      contextDocs = {},
+    } = req.body;
+
+    const prdText = contextDocs['docs/01-prd.md'] || contextDocs['prd'] || '';
+    const archText = architectureDoc || contextDocs['docs/02-arquitetura.md'] || '';
+
+    let adrsText = '';
+    if (adrsDocs && Array.isArray(adrsDocs)) {
+      adrsText = adrsDocs.map((a: any) => `### ${a.title || a.filename}\n${a.content || ''}`).join('\n\n');
+    } else {
+      adrsText = Object.entries(contextDocs)
+        .filter(([key]) => key.startsWith('docs/adr/'))
+        .map(([key, val]) => `### ${key}\n${val}`)
+        .join('\n\n');
+    }
+
+    const prompt = `Defina as páginas e telas da feature "${featureTitle}" (${featureSlug}) estruturadas rigorosamente no modelo Página → Componentes → Comportamentos.
+
+DIRETRIZ CRÍTICA DE REUTILIZAÇÃO:
+Reutilize componentes com o mesmo nome entre páginas em vez de inventar variações (por exemplo: Header, Sidebar, TaskList, TaskItem, FilterBar, NotificationBadge, ButtonBar, etc.). Se um componente já puder ser compartilhado ou for análogo a outras telas, use o mesmo nome padronizado.
+
+CONTEXTO DA SPEC DA FEATURE:
+${featureSpec || 'Feature principal com listagem, criação e interação do usuário.'}
+
+CONTEXTO DO PRD:
+${prdText || 'Requisitos da aplicação.'}
+
+CONTEXTO DA ARQUITETURA:
+${archText || 'Estrutura padrão de componentes e páginas.'}
+
+DECISÕES ARQUITETURAIS:
+${adrsText || 'Nenhum ADR específico.'}
+
+Para cada página da feature:
+- id: identificador único amigável (ex: "page-1", "page-2")
+- name: nome conciso da página (ex: "Lista de Tarefas", "Timer de Foco")
+- route: rota URL da página (ex: "/tasks", "/focus")
+- purpose: objetivo direto da página para o usuário
+- components: lista de componentes presentes na página:
+  - id: identificador único do componente (ex: "comp-1", "comp-2")
+  - name: nome padronizado do componente (ex: "QuickAddInput", "TaskList", "PomodoroDisplay")
+  - description: descrição do papel visual e de interação do componente
+  - behaviors: lista de comportamentos do componente:
+    - trigger: ação que o usuário realiza (o que o usuário faz, ex: "Digita o título e pressiona Enter", "Clica no checkbox", "Clica no botão Iniciar")
+    - expectedResult: resultado esperado da ação (ex: "Adiciona a tarefa no topo da lista", "Marca a tarefa como concluída", "Inicia o cronômetro regressivo")
+    - errorCase: o caso de erro ou validação (ex: "Se o título for vazio, destaca a borda em vermelho", "Se o timer já estiver rodando, exibe aviso", "Exibe toast em caso de falha de gravação")`;
+
+    const response = await ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.ARRAY,
+          description: 'Lista de páginas da feature com componentes e comportamentos estruturados',
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              id: { type: Type.STRING },
+              name: { type: Type.STRING },
+              route: { type: Type.STRING },
+              purpose: { type: Type.STRING },
+              components: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    id: { type: Type.STRING },
+                    name: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    behaviors: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          trigger: { type: Type.STRING },
+                          expectedResult: { type: Type.STRING },
+                          errorCase: { type: Type.STRING },
+                        },
+                        required: ['trigger', 'expectedResult', 'errorCase'],
+                      },
+                    },
+                  },
+                  required: ['id', 'name', 'description', 'behaviors'],
+                },
+              },
+            },
+            required: ['id', 'name', 'route', 'purpose', 'components'],
+          },
+        },
+      },
+    });
+
+    const pages = JSON.parse(response.text || '[]');
+    res.json({ pages });
+  } catch (error: any) {
+    console.error('Error in /api/generate-pages:', error);
+    res.status(500).json({ error: error.message || 'Erro ao gerar páginas.' });
+  }
+});
+
+// 4. Generate Wireframe HTML (Clean grayscale mockup) - supports page-level wireframe
 app.post('/api/generate-wireframe', async (req, res) => {
   try {
-    const { featureTitle, featureSlug, screensMarkdown, contextDocs } = req.body;
+    const {
+      featureTitle,
+      featureSlug,
+      pageId,
+      pageName,
+      pageRoute,
+      pagePurpose,
+      pageComponents,
+      screensMarkdown,
+      contextDocs,
+    } = req.body;
+
+    let componentsSummary = '';
+    if (pageComponents && Array.isArray(pageComponents)) {
+      componentsSummary = pageComponents
+        .map((c: any) => `Componente: ${c.name} - ${c.description || ''}`)
+        .join('\n');
+    }
+
+    const title = pageName ? `${pageName} (${pageRoute || '/'})` : featureTitle || featureSlug;
 
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
       contents: `Crie um protótipo wireframe simples em HTML + CSS inline (sem imagens externas, estilo cinza/lo-fi/wireframe de alta qualidade com fontes limpas, bordas pontilhadas ou sólidas cinzas, inputs simulados, botões com hover, tabs e listas de dados).
-Feature: "${featureTitle}" (${featureSlug})
-Descrição das telas:
-${screensMarkdown || 'Tela principal da feature com formulário e listagem.'}
+Página: "${title}"
+Objetivo: "${pagePurpose || 'Visualização da interface e componentes da página.'}"
+
+Componentes e seções a representar:
+${componentsSummary || screensMarkdown || 'Layout com componentes e elementos visuais da página.'}
 
 REQUISITOS DO HTML:
 - Retorne APENAS o código HTML completo <!DOCTYPE html><html>...</html> pronto para ser renderizado em um iframe sandbox com srcdoc.
@@ -382,44 +513,118 @@ REQUISITOS DO HTML:
     // Strip markdown code block if present
     rawHtml = rawHtml.replace(/^```html\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
 
-    res.json({ wireframeHtml: rawHtml });
+    res.json({ wireframeHtml: rawHtml, pageId });
   } catch (error: any) {
     console.error('Error in /api/generate-wireframe:', error);
     res.status(500).json({ error: error.message || 'Erro ao gerar wireframe.' });
   }
 });
 
-// 5. Break down Tasks for feature (Structured JSON)
+// 5. Break down Tasks for feature (Structured JSON into Prototype & Functional batches)
 app.post('/api/breakdown-tasks', async (req, res) => {
   try {
-    const { featureSlug, featureTitle, featureSpec, startIndex = 1 } = req.body;
+    const {
+      featureSlug,
+      featureTitle,
+      featureSpec,
+      pages = [],
+      architectureDoc,
+      adrsDocs,
+      screensDoc,
+      contextDocs = {},
+    } = req.body;
+
+    const archText =
+      architectureDoc ||
+      contextDocs['docs/02-arquitetura.md'] ||
+      contextDocs['architecture'] ||
+      '';
+
+    let adrsText = '';
+    if (adrsDocs && Array.isArray(adrsDocs)) {
+      adrsText = adrsDocs.map((a: any) => `### ${a.title || a.filename}\n${a.content || ''}`).join('\n\n');
+    } else {
+      adrsText = Object.entries(contextDocs)
+        .filter(([key]) => key.startsWith('docs/adr/'))
+        .map(([key, val]) => `### ${key}\n${val}`)
+        .join('\n\n');
+    }
+
+    const pagesText = Array.isArray(pages) && pages.length > 0
+      ? pages
+          .map((p: any) => {
+            const comps = (p.components || [])
+              .map((c: any) => {
+                const behs = (c.behaviors || [])
+                  .map((b: any) => `    - [Ação: ${b.trigger}] -> [Resultado: ${b.expectedResult}] (Erro: ${b.errorCase || '-'})`)
+                  .join('\n');
+                return `  * Componente: ${c.name} (${c.description || ''})\n${behs || '    (Sem comportamentos mapeados)'}`;
+              })
+              .join('\n');
+            return `Página: "${p.name}" | Rota: ${p.route} | Objetivo: ${p.purpose}\n${comps}`;
+          })
+          .join('\n\n')
+      : (screensDoc || contextDocs[`docs/specs/${featureSlug}/telas.md`] || '');
+
+    const prompt = `Quebre a feature "${featureTitle}" (${featureSlug}) em tarefas atômicas distribuídas estritamente em DUAS LEVAS:
+
+LEVA 1 — PROTÓTIPO VISUAL (kind: "prototype"):
+- Gere EXATAMENTE UMA tarefa de protótipo por página definida na feature.
+- Cada tarefa cobre apenas a parte visual: layout da página, componentes estruturados, estados vazio (empty), carregando (loading) e erro com dados fictícios.
+- NENHUMA conexão a banco de dados, APIs ou regras de negócio.
+- O campo "dependsOn" dessas tarefas deve ser [] (tarefa inicial de interface).
+
+LEVA 2 — FUNCIONAL (kind: "functional"):
+- Gere tarefas que tornam os comportamentos da página reais (persistência, validações, chamadas de serviço, regras de negócio).
+- Agrupe comportamentos relacionados, com no máximo 3 a 5 comportamentos por tarefa.
+- Cada tarefa funcional DEVE OBRIGATORIAMENTE depender (dependsOn) da tarefa de protótipo da sua página correspondente (use o código do protótipo, ex: ["T001"]).
+- Na seção "actions", use os comportamentos mapeados (action = trigger / ação do usuário, expectedResult = resultado esperado).
+
+DIRETRIZ CRÍTICA DE ARQUIVOS:
+Os caminhos em files DEVEM seguir exatamente a estrutura de pastas definida na arquitetura.
+
+PÁGINAS E COMPORTAMENTOS DA FEATURE:
+${pagesText || 'Páginas da feature.'}
+
+CONTEXTO DA ARQUITETURA DO PROJETO (docs/02-arquitetura.md):
+${archText || 'Estrutura padrão src/ com componentes, hooks, tipos e serviços.'}
+
+DECISÕES ARQUITETURAIS (ADRs):
+${adrsText || 'Nenhum ADR adicional.'}
+
+SPEC DA FEATURE (spec.md):
+${featureSpec || 'Implementar a lógica e UI da feature.'}
+
+Para cada tarefa, forneça:
+- code: identificador temporário (ex: "T001", "T002", "T003")
+- kind: "prototype" para protótipo de página ou "functional" para implementação funcional
+- title: título curto imperativo da tarefa (ex: "Protótipo da página Gerenciamento de Tarefas", "Persistência e regras de criação de tarefas")
+- objective: uma única frase explicando o objetivo
+- files: lista de caminhos de arquivos prováveis (SEGUINDO ESTRITAMENTE A ESTRUTURA DE PASTAS DA ARQUITETURA)
+- refs: referências como RF-01, ADR-0001
+- dependsOn: array de códigos de tarefa de que esta tarefa depende (ex: ["T001"], ou [] se for protótipo inicial)
+- actions: array de objetos { action: string, expectedResult: string } derivados dos comportamentos mapeados
+- acceptanceCriteria: array de strings com critérios mensuráveis
+- howToVerify: comando ou passo de verificação manual no navegador/terminal
+- outOfScope: o que NÃO fazer nesta tarefa específica`;
 
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
-      contents: `Quebre a feature "${featureTitle}" (${featureSlug}) em 2 a 5 tarefas pequenas e atômicas (cada uma executável em uma única sessão de agente de código como Claude Code, Cursor, Codex).
-Numere os códigos a partir de T${String(startIndex).padStart(3, '0')}.
-Para cada tarefa, forneça:
-- code: ex: "T001", "T002"
-- title: título curto imperativo da tarefa
-- objective: uma única frase explicando o objetivo
-- files: lista de arquivos que pode criar ou alterar
-- refs: referências como RF-01, ADR-0001
-- actions: array de objetos { action: string, expectedResult: string }
-- acceptanceCriteria: array de strings com critérios mensuráveis
-- howToVerify: comando ou passo manual exato
-- outOfScope: o que NÃO fazer nesta tarefa específica
-
-Spec da feature:
-${featureSpec || 'Implementar a lógica e UI da feature.'}`,
+      contents: prompt,
       config: {
         responseMimeType: 'application/json',
         responseSchema: {
           type: Type.ARRAY,
-          description: 'Lista de tarefas pequenas',
+          description: 'Lista de tarefas em duas levas (prototype e functional) com dependências',
           items: {
             type: Type.OBJECT,
             properties: {
               code: { type: Type.STRING },
+              kind: {
+                type: Type.STRING,
+                enum: ['prototype', 'functional'],
+                description: 'Classificação da tarefa: "prototype" para protótipo visual, "functional" para lógica e comportamentos',
+              },
               title: { type: Type.STRING },
               objective: { type: Type.STRING },
               files: {
@@ -429,6 +634,11 @@ ${featureSpec || 'Implementar a lógica e UI da feature.'}`,
               refs: {
                 type: Type.ARRAY,
                 items: { type: Type.STRING },
+              },
+              dependsOn: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+                description: 'Códigos de tarefas que devem ser executadas antes desta (ex: protótipo da página)',
               },
               actions: {
                 type: Type.ARRAY,
@@ -448,7 +658,7 @@ ${featureSpec || 'Implementar a lógica e UI da feature.'}`,
               howToVerify: { type: Type.STRING },
               outOfScope: { type: Type.STRING },
             },
-            required: ['code', 'title', 'objective', 'files', 'refs', 'actions', 'acceptanceCriteria', 'howToVerify', 'outOfScope'],
+            required: ['code', 'kind', 'title', 'objective', 'files', 'refs', 'actions', 'acceptanceCriteria', 'howToVerify', 'outOfScope'],
           },
         },
       },
@@ -470,13 +680,20 @@ ${featureSpec || 'Implementar a lógica e UI da feature.'}`,
         .map((f: string) => `- ${f}`)
         .join('\n');
 
+      const dependsOnList = Array.isArray(t.dependsOn) ? t.dependsOn : [];
+      const dependsOnStr = dependsOnList.length > 0 ? dependsOnList.join(', ') : 'Nenhuma (tarefa inicial)';
+      const kind = t.kind === 'prototype' ? 'prototype' : 'functional';
+      const tipoLabel = kind === 'prototype' ? 'Protótipo visual' : 'Funcional';
+
       const markdown = `# ${t.code} — ${t.title}
 **Feature:** ${featureSlug} | **Refs:** ${(t.refs || []).join(', ')}
+**Tipo:** ${tipoLabel}
+**Depende de:** ${dependsOnStr}
 
 ## Objetivo
 ${t.objective}
 
-## Arquivos que pode criar/alterar
+## Arquivos prováveis (confirmar no /plan)
 ${filesList}
 
 ## Ação → Resultado esperado
@@ -492,10 +709,15 @@ ${t.howToVerify}
 
 ## Fora de escopo
 ${t.outOfScope}
+
+## Plano de implementação
+_A ser preenchido pelo comando /plan dentro da IDE._
 `;
 
       return {
         ...t,
+        kind,
+        dependsOn: dependsOnList,
         featureSlug,
         markdown,
       };
@@ -596,6 +818,168 @@ ${formatApprovedDocs(contextDocs)}`,
   } catch (error: any) {
     console.error('Error in /api/generate-adrs:', error);
     res.status(500).json({ error: error.message || 'Erro ao gerar ADRs.' });
+  }
+});
+
+// 8. Generate AGENTS.md with AI
+app.post('/api/generate-agents-md', async (req, res) => {
+  try {
+    const { projectName, summary, brainstormDoc, prdDoc, architectureDoc, adrs, features } = req.body;
+
+    const adrsFormatted = Array.isArray(adrs)
+      ? adrs.map((a: any) => `### ${a.title || a.filename}\n${a.content || ''}`).join('\n\n')
+      : 'Nenhum ADR registrado.';
+
+    const featuresFormatted = Array.isArray(features)
+      ? features.map((f: any) => `- **${f.title}** (${f.slug}): ${f.description || ''}`).join('\n')
+      : 'Nenhuma feature cadastrada.';
+
+    const prompt = `Você é um arquiteto de software sênior encarregado de gerar a constituição oficial do projeto para agentes autônomos de código (Claude Code, Codex, Cursor, Antigravity) no arquivo AGENTS.md.
+
+DOCUMENTOS APROVADOS DO PROJETO:
+
+=== 1. BRAINSTORM ===
+${brainstormDoc || 'Resumo do brainstorm não fornecido.'}
+
+=== 2. PRD (Requisitos Funcionais e Não Funcionais) ===
+${prdDoc || 'PRD não fornecido.'}
+
+=== 3. ARQUITETURA DE SOFTWARE (docs/02-arquitetura.md) ===
+${architectureDoc || 'Arquitetura não fornecida.'}
+
+=== 4. DECISÕES ARQUITETURAIS (ADRs) ===
+${adrsFormatted}
+
+=== 5. FEATURES DO MVP ===
+${featuresFormatted}
+
+ESTRUTURA OBRIGATÓRIA DO DOCUMENTO:
+Gere o conteúdo em Markdown no formato exato com estas 6 seções rigorosas:
+
+# AGENTS.md — Constituição do Projeto: ${projectName || 'Projeto'}
+
+> Este documento é a fonte única da verdade para todos os agentes autônomos de código (Claude Code, Cursor, Codex, Antigravity) que trabalham neste repositório. Siga rigorosamente as instruções abaixo.
+
+## 1. Resumo do Produto
+[Descreva um resumo pragmático e direto do produto baseado no Brainstorm e PRD: proposta de valor, público-alvo e problema que resolve.]
+
+## 2. Stack Tecnológica
+[Copie e adapte EXATAMENTE a stack definida em docs/02-arquitetura.md (frontend, backend, banco de dados, bibliotecas, linguagem, estilização, etc.).]
+
+## 3. Estrutura de Pastas e Invariantes
+[Copie a estrutura de pastas definida na arquitetura e liste as invariantes estruturais do projeto:
+- As especificações oficiais de cada feature residem em docs/specs/NNN-nome/spec.md.
+- As especificações atômicas de tarefas residem em docs/tasks/NNN-nome/T00X.md.
+- Cada tarefa deve ser executada de forma atômica e independente.]
+
+## 4. Regras de Código e Invariantes
+[Derivadas rigorosamente dos ADRs e dos Requisitos Não Funcionais (RNFs) do PRD, incluindo:
+- Regras estritas de tipagem e padrões
+- Não adicione dependências não solicitadas
+- Não altere arquivos fora da lista permitida na seção "Arquivos que pode criar/alterar" de cada tarefa
+- Não quebre testes existentes e preserve a arquitetura Local-First/banco conforme decidido nos ADRs
+- Outras restrições extraídas dos ADRs e RNFs]
+
+## 5. Comandos do Projeto
+[Comandos reais do projeto para instalar, rodar em desenvolvimento, migrations (se aplicável), testes, lint e build, CONFORME A STACK EXATA do projeto (ex: se for npm, yarn, pnpm, cargo, python, etc., use os comandos reais).]
+
+## 6. Fluxo de Trabalho
+1. Leia STATUS.md e pegue a próxima tarefa pendente cujas dependências estejam concluídas.
+2. Rode o planejamento da tarefa (/plan T00X no Claude Code, ou siga docs/workflow/plan.md em outras ferramentas).
+3. Aguarde revisão humana do plano.
+4. Rode a execução (/execute T00X, ou siga docs/workflow/execute.md).
+5. Nunca execute mais de uma tarefa sem autorização.
+`;
+
+    const response = await ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: prompt,
+      config: {
+        temperature: 0.3,
+      },
+    });
+
+    let markdown = response.text || '';
+    if (markdown.startsWith('```markdown') && markdown.endsWith('```')) {
+      markdown = markdown.replace(/^```markdown\s*/, '').replace(/\s*```$/, '');
+    } else if (markdown.startsWith('```') && markdown.endsWith('```')) {
+      markdown = markdown.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    }
+
+    res.json({ agentsMd: markdown.trim() });
+  } catch (error: any) {
+    console.error('Error in /api/generate-agents-md:', error);
+    res.status(500).json({ error: error.message || 'Erro ao gerar AGENTS.md com IA.' });
+  }
+});
+
+// 9. Generate Stack-Layer Skills with AI
+app.post('/api/generate-skills', async (req, res) => {
+  try {
+    const { architectureDoc, adrs, projectName } = req.body;
+
+    const adrsFormatted = Array.isArray(adrs)
+      ? adrs.map((a: any) => `### ${a.title || a.filename}\n${a.content || ''}`).join('\n\n')
+      : 'Nenhum ADR registrado.';
+
+    const systemInstruction = `Você é um arquiteto de software sênior encarregado de criar skills de código e regras de projeto (.claude/skills, .cursor/rules e docs/skills) para agentes de IA autônomos.
+A partir da arquitetura do projeto e dos ADRs decididos, gere de 4 a 7 skills altamente especializadas, exatamente uma por camada ou tipo de arquivo relevante da stack escolhida (por exemplo: componentes de UI, server actions / rotas de API, hooks / gerenciamento de estado, modelos de dados e migrations, políticas de segurança / autorização, integrações externas, testes automatizados e verificação).
+
+Cada skill deve conter:
+- slug: identificador kebab-case (ex: "ui-components", "api-routes", "data-models", "state-hooks", "test-standards")
+- name: nome claro e objetivo da skill (ex: "Componentes de UI", "Rotas de API e Server Actions", etc.)
+- description: descrição concisa do propósito e escopo da skill
+- globs: padrão de caminho onde a skill se aplica (ex: "src/components/**/*.{tsx,jsx}", "src/routes/**/*.ts", etc.)
+- content: instruções técnicas aprofundadas em Markdown estruturado, cobrindo:
+  - Boas Práticas e Convenções do Projeto
+  - Exemplo curto de código correto e idiomático
+  - Erros comuns a evitar`;
+
+    const prompt = `DOCUMENTOS DE ARQUITETURA DO PROJETO "${projectName || 'Projeto'}":
+
+=== ARQUITETURA (docs/02-arquitetura.md) ===
+${architectureDoc || 'Arquitetura não fornecida.'}
+
+=== DECISÕES ARQUITETURAIS (ADRs) ===
+${adrsFormatted}
+
+Gere entre 4 e 7 skills adequadas a esta stack. Retorne estritamente o JSON com o schema solicitado.`;
+
+    const response = await ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: prompt,
+      config: {
+        systemInstruction,
+        temperature: 0.3,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            skills: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  slug: { type: Type.STRING },
+                  name: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  globs: { type: Type.STRING },
+                  content: { type: Type.STRING },
+                },
+                required: ['slug', 'name', 'description', 'globs', 'content'],
+              },
+            },
+          },
+          required: ['skills'],
+        },
+      },
+    });
+
+    const parsed = JSON.parse(response.text || '{"skills":[]}');
+    res.json({ skills: parsed.skills || [] });
+  } catch (error: any) {
+    console.error('Error in /api/generate-skills:', error);
+    res.status(500).json({ error: error.message || 'Erro ao gerar skills com IA.' });
   }
 });
 

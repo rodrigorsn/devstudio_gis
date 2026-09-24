@@ -1,4 +1,6 @@
-import { ProjectData, StageId, STAGES_LIST } from '../types/spec';
+import { ProjectData, StageId, STAGES_LIST, TaskItem } from '../types/spec';
+import { generateTelasMarkdown } from './telasGenerator';
+import { DEFAULT_DEMO_SKILLS } from './exportTemplates';
 
 export function createEmptyProject(projectName = 'Meu Novo App'): ProjectData {
   const stages: ProjectData['stages'] = {
@@ -34,6 +36,7 @@ export function createEmptyProject(projectName = 'Meu Novo App'): ProjectData {
     features: [],
     tasks: [],
     adrs: [],
+    skills: [],
     activeStageId: 'brainstorm',
     verificationChecks: {},
   };
@@ -228,26 +231,61 @@ flowchart TD
 ## 5. Requisitos do PRD Atendidos
 - Atende plenamente o RF-01 e RNF-01.
 `,
-      screensMarkdown: `# Telas: Gestão de Tarefas Atômicas
-**Feature:** 001-gestao-tarefas
-
-## 1. Telas e Componentes
-- **Barra Superior de Ação:** Campo de criação rápida com placeholder "Nova tarefa rápida... (pressione Enter)".
-- **Card de Tarefa:** Checkbox circular, título em negrito, badge de tempo estimado (ex: "25 min"), botão de ação rápida "Focar".
-- **Filtros Rápidos:** Botões estilo tab: Todas, Pendentes, Concluídas.
-
-## 2. Tabela de Interações
-| Elemento / Ação do Usuário | Resultado Esperado | Validação / Feedback |
-| --- | --- | --- |
-| Clicar no checkbox da tarefa | Alterna estado entre concluída e pendente | Efeito visual de riscado e som sutil opcional |
-| Clicar no botão "Focar" | Seleciona a tarefa como ativa e abre o Pomodoro | Destaca borda do card em âmbar |
-| Pressionar tecla 'N' | Coloca foco imediato no input de nova tarefa | Cursor pronto para digitação |
-
-## 3. Estados de Interface
-- **Vazio:** Ilustração de prancheta com texto "Nenhuma tarefa cadastrada. Adicione sua primeira meta de hoje!".
-- **Carregando:** Skeleton shimmer sutil de 3 cards.
-`,
-      wireframeHtml: `<!DOCTYPE html>
+      pages: [
+        {
+          id: 'page-tasks',
+          name: 'Gerenciamento de Tarefas',
+          route: '/tasks',
+          purpose: 'Permitir ao usuário cadastrar, organizar por status e priorizar tarefas diárias.',
+          components: [
+            {
+              id: 'comp-quick-add',
+              name: 'QuickAddInput',
+              description: 'Barra de digitação rápida fixada no topo com suporte à tecla Enter.',
+              behaviors: [
+                {
+                  trigger: 'Digita título e pressiona Enter',
+                  expectedResult: 'Insere tarefa no topo da lista com status pendente e limpa campo',
+                  errorCase: 'Se o texto for vazio, exibe borda vermelha e impede inserção',
+                },
+                {
+                  trigger: 'Pressiona tecla Escape',
+                  expectedResult: 'Cancela foco do input e limpa o texto digitado',
+                  errorCase: '-',
+                },
+              ],
+            },
+            {
+              id: 'comp-task-list',
+              name: 'TaskList',
+              description: 'Listagem vertical de tarefas com checkboxes, tempo estimado e ações.',
+              behaviors: [
+                {
+                  trigger: 'Clica no checkbox da tarefa',
+                  expectedResult: 'Alterna status concluído com efeito riscado e persiste alteração',
+                  errorCase: 'Se houver erro de gravação, exibe toast e desfaz marcação',
+                },
+                {
+                  trigger: 'Clica no botão ⚡ Focar',
+                  expectedResult: 'Define a tarefa como ativa e redireciona para a tela /focus',
+                  errorCase: '-',
+                },
+              ],
+            },
+            {
+              id: 'comp-task-filter',
+              name: 'TaskFilterBar',
+              description: 'Abas de filtragem por status (Todas, Pendentes, Concluídas).',
+              behaviors: [
+                {
+                  trigger: 'Clica em uma das abas de filtro',
+                  expectedResult: 'Filtra a visualização da lista instantaneamente',
+                  errorCase: '-',
+                },
+              ],
+            },
+          ],
+          wireframeHtml: `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -321,6 +359,9 @@ flowchart TD
 </div>
 </body>
 </html>`,
+        },
+      ],
+      screensMarkdown: '',
     },
     {
       id: 'feat-2',
@@ -356,25 +397,61 @@ flowchart TD
 ## 5. Requisitos do PRD Atendidos
 - Atende ao RF-02.
 `,
-      screensMarkdown: `# Telas: Timer de Foco Pomodoro
-**Feature:** 002-timer-foco
-
-## 1. Telas e Componentes
-- **Display Circular:** Mostrador de tempo grande (ex: "24:58") com barra de progresso circular SVG.
-- **Controles de Reprodução:** Botões Iniciar, Pausar e Resetar.
-- **Indicador de Tarefa Ativa:** Mostra qual tarefa está acumulando os minutos de foco.
-
-## 2. Tabela de Interações
-| Ação | Resultado Esperado | Validação |
-| --- | --- | --- |
-| Clicar em "Iniciar" | Inicia decremento a cada 1 segundo | Ícone muda para Pause |
-| Clicar em "Pausar" | Congela o cronômetro | Estado salvo |
-
-## 3. Estados de Interface
-- **Parado:** Mostra tempo padrão 25:00.
-- **Em Execução:** Animação de pulso suave.
-`,
-      wireframeHtml: `<!DOCTYPE html>
+      pages: [
+        {
+          id: 'page-focus',
+          name: 'Timer de Foco Pomodoro',
+          route: '/focus',
+          purpose: 'Cronômetro visual imersivo para blocos de foco de 25 minutos e pausas curtas.',
+          components: [
+            {
+              id: 'comp-timer-display',
+              name: 'PomodoroDisplay',
+              description: 'Mostrador digital tabular grande com barra de progresso circular SVG.',
+              behaviors: [
+                {
+                  trigger: 'Tempo regride a cada 1 segundo',
+                  expectedResult: 'Atualiza o mostrador e o título da aba do navegador',
+                  errorCase: 'Se aba for suspensa em background, recalcula tempo via performance.now()',
+                },
+                {
+                  trigger: 'Contador chega a zero',
+                  expectedResult: 'Emite bipe suave e contabiliza sessão na tarefa ativa',
+                  errorCase: '-',
+                },
+              ],
+            },
+            {
+              id: 'comp-timer-controls',
+              name: 'TimerControls',
+              description: 'Botões principais de ação: Iniciar/Pausar e Resetar.',
+              behaviors: [
+                {
+                  trigger: 'Clica em "Iniciar Foco"',
+                  expectedResult: 'Inicia decremento a cada 1s e altera botão para "Pausar"',
+                  errorCase: '-',
+                },
+                {
+                  trigger: 'Clica em "Resetar"',
+                  expectedResult: 'Retorna cronômetro para 25:00 e redefine barra de progresso',
+                  errorCase: '-',
+                },
+              ],
+            },
+            {
+              id: 'comp-active-badge',
+              name: 'ActiveTaskBadge',
+              description: 'Card superior indicando qual tarefa está recebendo os minutos acumulados.',
+              behaviors: [
+                {
+                  trigger: 'Clica em "Trocar tarefa"',
+                  expectedResult: 'Abre seletor com as tarefas pendentes cadastradas',
+                  errorCase: 'Se não houver tarefas cadastradas, redireciona para /tasks',
+                },
+              ],
+            },
+          ],
+          wireframeHtml: `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
@@ -402,44 +479,164 @@ flowchart TD
 </div>
 </body>
 </html>`,
+        },
+      ],
+      screensMarkdown: '',
     },
   ];
 
-  const tasks = [
+  // Auto-generate screensMarkdown for features
+  features.forEach((f) => {
+    f.screensMarkdown = generateTelasMarkdown(f.pages || [], f.title);
+  });
+
+  const tasks: TaskItem[] = [
     {
       id: 'task-1',
       code: 'T001',
       featureSlug: '001-gestao-tarefas',
-      title: 'Criar tipos e camada de armazenamento de tarefas',
-      objective: 'Definir interfaces TypeScript e funções de leitura/escrita no localStorage com validação de esquema.',
+      title: 'Protótipo da página Gerenciamento de Tarefas',
+      objective: 'Implementar a interface visual da página /tasks com layout, componentes e dados mockados.',
+      files: ['src/pages/TasksPage.tsx', 'src/components/TaskList.tsx', 'src/components/TaskItem.tsx'],
+      refs: ['RF-01', 'RF-05'],
+      kind: 'prototype',
+      dependsOn: [],
+      actions: [
+        { action: 'Abrir a rota /tasks', expectedResult: 'Exibir layout responsivo e lista com dados fictícios' },
+        { action: 'Digitar no QuickAddInput', expectedResult: 'Campo aceita digitação e Enter limpa o input' },
+      ],
+      acceptanceCriteria: [
+        'Layout responsivo conforme arquitetura',
+        'Componentes renderizam sem quebra',
+        'Estados vazio, carregando e erro com dados fictícios',
+      ],
+      howToVerify: 'Abrir a rota /tasks no navegador e inspecionar a renderização visual dos componentes.',
+      outOfScope: 'Não conectar a banco de dados, APIs ou lógica de negócio nesta etapa.',
+      markdown: `# T001 — Protótipo da página Gerenciamento de Tarefas
+**Feature:** 001-gestao-tarefas | **Refs:** RF-01, RF-05
+**Tipo:** Protótipo visual
+**Depende de:** Nenhuma (tarefa inicial)
+
+## Objetivo
+Implementar a interface visual da página /tasks com layout, componentes e dados mockados.
+
+## Arquivos prováveis (confirmar no /plan)
+- src/pages/TasksPage.tsx
+- src/components/TaskList.tsx
+- src/components/TaskItem.tsx
+
+## Ação → Resultado esperado
+| Ação | Resultado esperado |
+| --- | --- |
+| Abrir a rota /tasks | Exibir layout responsivo e lista com dados fictícios |
+| Digitar no QuickAddInput | Campo aceita digitação e Enter limpa o input |
+
+## Critérios de aceite
+- [ ] Layout responsivo conforme arquitetura
+- [ ] Componentes renderizam sem quebra
+- [ ] Estados vazio, carregando e erro com dados fictícios
+
+## Como verificar
+Abrir a rota /tasks no navegador e inspecionar a renderização visual dos componentes.
+
+## Fora de escopo
+Não conectar a banco de dados, APIs ou lógica de negócio nesta etapa.
+
+## Plano de implementação
+_A ser preenchido pelo comando /plan dentro da IDE._
+`,
+      completed: true,
+    },
+    {
+      id: 'task-2',
+      code: 'T002',
+      featureSlug: '002-timer-foco',
+      title: 'Protótipo da página Timer de Foco',
+      objective: 'Criar a interface visual da tela /focus com mostrador circular SVG e botões de controle.',
+      files: ['src/pages/FocusPage.tsx', 'src/components/PomodoroDisplay.tsx', 'src/components/TimerControls.tsx'],
+      refs: ['RF-02'],
+      kind: 'prototype',
+      dependsOn: [],
+      actions: [
+        { action: 'Abrir a rota /focus', expectedResult: 'Renderiza display de 25:00 e botões Iniciar/Resetar' },
+      ],
+      acceptanceCriteria: [
+        'Display circular SVG responsivo e centralizado',
+        'Tempo formatado como MM:SS com zeros à esquerda',
+      ],
+      howToVerify: 'Abrir a rota /focus no navegador e verificar renderização do SVG circular e botões.',
+      outOfScope: 'Não integrar motor de contagem real ou persistência de dados.',
+      markdown: `# T002 — Protótipo da página Timer de Foco
+**Feature:** 002-timer-foco | **Refs:** RF-02
+**Tipo:** Protótipo visual
+**Depende de:** Nenhuma (tarefa inicial)
+
+## Objetivo
+Criar a interface visual da tela /focus com mostrador circular SVG e botões de controle.
+
+## Arquivos prováveis (confirmar no /plan)
+- src/pages/FocusPage.tsx
+- src/components/PomodoroDisplay.tsx
+- src/components/TimerControls.tsx
+
+## Ação → Resultado esperado
+| Ação | Resultado esperado |
+| --- | --- |
+| Abrir a rota /focus | Renderiza display de 25:00 e botões Iniciar/Resetar |
+
+## Critérios de aceite
+- [ ] Display circular SVG responsivo e centralizado
+- [ ] Tempo formatado como MM:SS com zeros à esquerda
+
+## Como verificar
+Abrir a rota /focus no navegador e verificar renderização do SVG circular e botões.
+
+## Fora de escopo
+Não integrar motor de contagem real ou persistência de dados.
+
+## Plano de implementação
+_A ser preenchido pelo comando /plan dentro da IDE._
+`,
+      completed: true,
+    },
+    {
+      id: 'task-3',
+      code: 'T003',
+      featureSlug: '001-gestao-tarefas',
+      title: 'Persistência e regras de criação rápida de tarefas',
+      objective: 'Tornar funcionais os comportamentos de criação e armazenamento de tarefas no localStorage.',
       files: ['src/types/task.ts', 'src/storage/taskStorage.ts'],
       refs: ['RF-01', 'ADR-0001'],
+      kind: 'functional',
+      dependsOn: ['T001'],
       actions: [
-        { action: 'Criar interface Task', expectedResult: 'Exportar tipos estritos com id, title, status, estimatedMinutes' },
-        { action: 'Implementar saveTasks e loadTasks', expectedResult: 'Serializar e desserializar com fallback em array vazio' },
+        { action: 'Digita título e pressiona Enter', expectedResult: 'Insere tarefa no topo da lista com status pendente e limpa campo' },
+        { action: 'Clica no checkbox da tarefa', expectedResult: 'Alterna status concluído com efeito riscado e persiste alteração' },
       ],
       acceptanceCriteria: [
         'Tipos TypeScript sem uso de any',
         'loadTasks retorna array consistente mesmo se localStorage estiver corrompido',
         'saveTasks persiste alterações com timestamp atualizado',
       ],
-      howToVerify: 'Executar npm test ou rodar teste unitário que grava 2 tarefas e recupera o array íntegro.',
-      outOfScope: 'Não criar componentes visuais ou UI nesta tarefa.',
-      markdown: `# T001 — Criar tipos e camada de armazenamento de tarefas
+      howToVerify: 'Executar npm test ou criar tarefa no navegador e recarregar a página para atestar a persistência.',
+      outOfScope: 'Não alterar layouts das telas já prototipadas.',
+      markdown: `# T003 — Persistência e regras de criação rápida de tarefas
 **Feature:** 001-gestao-tarefas | **Refs:** RF-01, ADR-0001
+**Tipo:** Funcional
+**Depende de:** T001
 
 ## Objetivo
-Definir interfaces TypeScript e funções de leitura/escrita no localStorage com validação de esquema.
+Tornar funcionais os comportamentos de criação e armazenamento de tarefas no localStorage.
 
-## Arquivos que pode criar/alterar
+## Arquivos prováveis (confirmar no /plan)
 - src/types/task.ts
 - src/storage/taskStorage.ts
 
 ## Ação → Resultado esperado
 | Ação | Resultado esperado |
 | --- | --- |
-| Criar interface Task | Exportar tipos estritos com id, title, status, estimatedMinutes |
-| Implementar saveTasks e loadTasks | Serializar e desserializar com fallback em array vazio |
+| Digita título e pressiona Enter | Insere tarefa no topo da lista com status pendente e limpa campo |
+| Clica no checkbox da tarefa | Alterna status concluído com efeito riscado e persiste alteração |
 
 ## Critérios de aceite
 - [ ] Tipos TypeScript sem uso de any
@@ -447,119 +644,82 @@ Definir interfaces TypeScript e funções de leitura/escrita no localStorage com
 - [ ] saveTasks persiste alterações com timestamp atualizado
 
 ## Como verificar
-Executar npm test ou rodar teste unitário que grava 2 tarefas e recupera o array íntegro.
+Executar npm test ou criar tarefa no navegador e recarregar a página para atestar a persistência.
 
 ## Fora de escopo
-Não criar componentes visuais ou UI nesta tarefa.
+Não alterar layouts das telas já prototipadas.
+
+## Plano de implementação
+_A ser preenchido pelo comando /plan dentro da IDE._
 `,
       completed: true,
-    },
-    {
-      id: 'task-2',
-      code: 'T002',
-      featureSlug: '001-gestao-tarefas',
-      title: 'Construir componente TaskList e formulário de adição rápida',
-      objective: 'Implementar a interface visual da lista de tarefas com atalho Enter para criação rápida.',
-      files: ['src/components/TaskList.tsx', 'src/components/TaskItem.tsx'],
-      refs: ['RF-01', 'RF-05'],
-      actions: [
-        { action: 'Criar input com onKeyDown', expectedResult: 'Ao teclar Enter com texto válido, adiciona tarefa na lista' },
-        { action: 'Renderizar lista com checkboxes', expectedResult: 'Clicar no checkbox alterna entre pendente e concluído' },
-      ],
-      acceptanceCriteria: [
-        'Input limpa automaticamente após submissão bem-sucedida',
-        'Tarefas concluídas mostram estilo tachado sutil',
-        'Contador de tarefas pendentes atualiza em tempo real',
-      ],
-      howToVerify: 'Abrir a tela no navegador, digitar uma tarefa, dar Enter e marcar o checkbox para conferir o estado.',
-      outOfScope: 'Não integrar timer Pomodoro nesta etapa.',
-      markdown: `# T002 — Construir componente TaskList e formulário de adição rápida
-**Feature:** 001-gestao-tarefas | **Refs:** RF-01, RF-05
-
-## Objetivo
-Implementar a interface visual da lista de tarefas com atalho Enter para criação rápida.
-
-## Arquivos que pode criar/alterar
-- src/components/TaskList.tsx
-- src/components/TaskItem.tsx
-
-## Ação → Resultado esperado
-| Ação | Resultado esperado |
-| --- | --- |
-| Criar input com onKeyDown | Ao teclar Enter com texto válido, adiciona tarefa na lista |
-| Renderizar lista com checkboxes | Clicar no checkbox alterna entre pendente e concluído |
-
-## Critérios de aceite
-- [ ] Input limpa automaticamente após submissão bem-sucedida
-- [ ] Tarefas concluídas mostram estilo tachado sutil
-- [ ] Contador de tarefas pendentes atualiza em tempo real
-
-## Como verificar
-Abrir a tela no navegador, digitar uma tarefa, dar Enter e marcar o checkbox para conferir o estado.
-
-## Fora de escopo
-Não integrar timer Pomodoro nesta etapa.
-`,
-      completed: true,
-    },
-    {
-      id: 'task-3',
-      code: 'T003',
-      featureSlug: '002-timer-foco',
-      title: 'Desenvolver hook usePomodoro e display do cronômetro',
-      objective: 'Criar a lógica de contagem regressiva de foco com cálculo de performance.now() e controles de play/pause.',
-      files: ['src/hooks/usePomodoro.ts', 'src/components/PomodoroTimer.tsx'],
-      refs: ['RF-02'],
-      actions: [
-        { action: 'Implementar usePomodoro', expectedResult: 'Retorna timeLeft, isRunning, start, pause, reset' },
-        { action: 'Montar display SVG circular', expectedResult: 'Progresso gráfico acompanha os minutos restantes' },
-      ],
-      acceptanceCriteria: [
-        'O timer não perde precisão quando a aba fica inativa',
-        'Transição automática para intervalo de descanso ao zerar',
-        'Tempo formatado como MM:SS com zeros à esquerda',
-      ],
-      howToVerify: 'Configurar tempo de teste para 5 segundos, iniciar o cronômetro e verificar se aciona o término corretamente.',
-      outOfScope: 'Não gravar no banco nesta tarefa.',
-      markdown: `# T003 — Desenvolver hook usePomodoro e display do cronômetro
-**Feature:** 002-timer-foco | **Refs:** RF-02
-
-## Objetivo
-Criar a lógica de contagem regressiva de foco com cálculo de performance.now() e controles de play/pause.
-
-## Arquivos que pode criar/alterar
-- src/hooks/usePomodoro.ts
-- src/components/PomodoroTimer.tsx
-
-## Ação → Resultado esperado
-| Ação | Resultado esperado |
-| --- | --- |
-| Implementar usePomodoro | Retorna timeLeft, isRunning, start, pause, reset |
-| Montar display SVG circular | Progresso gráfico acompanha os minutos restantes |
-
-## Critérios de aceite
-- [ ] O timer não perde precisão quando a aba fica inativa
-- [ ] Transição automática para intervalo de descanso ao zerar
-- [ ] Tempo formatado como MM:SS com zeros à esquerda
-
-## Como verificar
-Configurar tempo de teste para 5 segundos, iniciar o cronômetro e verificar se aciona o término corretamente.
-
-## Fora de escopo
-Não gravar no banco nesta tarefa.
-`,
-      completed: false,
     },
     {
       id: 'task-4',
       code: 'T004',
       featureSlug: '002-timer-foco',
-      title: 'Vincular timer de foco com a tarefa selecionada',
-      objective: 'Registrar histórico de tempo dedicado a cada tarefa individual ao finalizar uma sessão de foco.',
-      files: ['src/context/FocusContext.tsx', 'src/components/TaskFocusBadge.tsx'],
-      refs: ['RF-02', 'RF-03'],
+      title: 'Motor de contagem regressiva e Web Worker',
+      objective: 'Implementar a lógica temporal do cronômetro Pomodoro imune a throttling em background.',
+      files: ['src/services/timerEngine.ts', 'src/hooks/usePomodoro.ts'],
+      refs: ['RF-02'],
+      kind: 'functional',
+      dependsOn: ['T002'],
       actions: [
-        { action: 'Ao concluir ciclo de foco', expectedResult: 'Acrescentar 25 minutos ao tempo total da tarefa selecionada' },
+        { action: 'Clica em "Iniciar Foco"', expectedResult: 'Inicia decremento a cada 1s e altera botão para "Pausar"' },
+        { action: 'Tempo regride a cada 1 segundo', expectedResult: 'Atualiza o mostrador e o título da aba do navegador' },
+      ],
+      acceptanceCriteria: [
+        'Timer regride confiavelmente mesmo com a aba em segundo plano',
+        'Botão Resetar restaura o estado inicial de 25 minutos',
+      ],
+      howToVerify: 'Iniciar o cronômetro, trocar de aba por 1 minuto e conferir precisão ao retornar.',
+      outOfScope: 'Não gravar histórico de sessões ainda.',
+      markdown: `# T004 — Motor de contagem regressiva e Web Worker
+**Feature:** 002-timer-foco | **Refs:** RF-02
+**Tipo:** Funcional
+**Depende de:** T002
+
+## Objetivo
+Implementar a lógica temporal do cronômetro Pomodoro imune a throttling em background.
+
+## Arquivos prováveis (confirmar no /plan)
+- src/services/timerEngine.ts
+- src/hooks/usePomodoro.ts
+
+## Ação → Resultado esperado
+| Ação | Resultado esperado |
+| --- | --- |
+| Clica em "Iniciar Foco" | Inicia decremento a cada 1s e altera botão para "Pausar" |
+| Tempo regride a cada 1 segundo | Atualiza o mostrador e o título da aba do navegador |
+
+## Critérios de aceite
+- [ ] Timer regride confiavelmente mesmo com a aba em segundo plano
+- [ ] Botão Resetar restaura o estado inicial de 25 minutos
+
+## Como verificar
+Iniciar o cronômetro, trocar de aba por 1 minuto e conferir precisão ao retornar.
+
+## Fora de escopo
+Não gravar histórico de sessões ainda.
+
+## Plano de implementação
+_A ser preenchido pelo comando /plan dentro da IDE._
+`,
+      completed: false,
+    },
+    {
+      id: 'task-5',
+      code: 'T005',
+      featureSlug: '002-timer-foco',
+      title: 'Vincular sessões de foco com a tarefa ativa',
+      objective: 'Registrar histórico de tempo dedicado a cada tarefa individual ao finalizar uma sessão de foco.',
+      files: ['src/context/FocusContext.tsx', 'src/components/ActiveTaskBadge.tsx'],
+      refs: ['RF-02', 'RF-03'],
+      kind: 'functional',
+      dependsOn: ['T001', 'T002'],
+      actions: [
+        { action: 'Contador chega a zero', expectedResult: 'Emite bipe suave e contabiliza sessão na tarefa ativa' },
+        { action: 'Clica em "Trocar tarefa"', expectedResult: 'Abre seletor com as tarefas pendentes cadastradas' },
       ],
       acceptanceCriteria: [
         'Card de tarefa exibe badge com minutos totais focados acumulados',
@@ -567,20 +727,23 @@ Não gravar no banco nesta tarefa.
       ],
       howToVerify: 'Concluir um ciclo simulado de foco e verificar se o card da tarefa exibiu o novo tempo acumulado.',
       outOfScope: 'Gráficos analíticos semanais.',
-      markdown: `# T004 — Vincular timer de foco com a tarefa selecionada
+      markdown: `# T005 — Vincular sessões de foco com a tarefa ativa
 **Feature:** 002-timer-foco | **Refs:** RF-02, RF-03
+**Tipo:** Funcional
+**Depende de:** T001, T002
 
 ## Objetivo
 Registrar histórico de tempo dedicado a cada tarefa individual ao finalizar uma sessão de foco.
 
-## Arquivos que pode criar/alterar
+## Arquivos prováveis (confirmar no /plan)
 - src/context/FocusContext.tsx
-- src/components/TaskFocusBadge.tsx
+- src/components/ActiveTaskBadge.tsx
 
 ## Ação → Resultado esperado
 | Ação | Resultado esperado |
 | --- | --- |
-| Ao concluir ciclo de foco | Acrescentar 25 minutos ao tempo total da tarefa selecionada |
+| Contador chega a zero | Emite bipe suave e contabiliza sessão na tarefa ativa |
+| Clica em "Trocar tarefa" | Abre seletor com as tarefas pendentes cadastradas |
 
 ## Critérios de aceite
 - [ ] Card de tarefa exibe badge com minutos totais focados acumulados
@@ -591,6 +754,9 @@ Concluir um ciclo simulado de foco e verificar se o card da tarefa exibiu o novo
 
 ## Fora de escopo
 Gráficos analíticos semanais.
+
+## Plano de implementação
+_A ser preenchido pelo comando /plan dentro da IDE._
 `,
       completed: false,
     },
@@ -765,6 +931,7 @@ Gráficos analíticos semanais.
     features,
     tasks,
     adrs,
+    skills: DEFAULT_DEMO_SKILLS,
     activeStageId: 'implementation',
     selectedFeatureId: 'feat-1',
     selectedTaskId: 'task-1',
@@ -777,17 +944,30 @@ export function generateStatusMd(project: ProjectData): string {
   const completedCount = project.tasks.filter((t) => t.completed).length;
   const totalCount = project.tasks.length;
 
-  const taskLines = project.tasks
-    .map((t) => `- [${t.completed ? 'x' : ' '}] ${t.code} — ${t.title} (${t.featureSlug})`)
-    .join('\n');
+  const prototypeTasks = project.tasks.filter((t) => t.kind === 'prototype');
+  const functionalTasks = project.tasks.filter((t) => t.kind !== 'prototype');
+
+  const formatLine = (t: TaskItem) =>
+    `- [${t.completed ? 'x' : ' '}] ${t.code} — ${t.title} (${t.featureSlug})`;
+
+  const prototypeLines = prototypeTasks.length > 0
+    ? prototypeTasks.map(formatLine).join('\n')
+    : '_Nenhuma tarefa de protótipo visual cadastrada._';
+
+  const functionalLines = functionalTasks.length > 0
+    ? functionalTasks.map(formatLine).join('\n')
+    : '_Nenhuma tarefa funcional cadastrada._';
 
   return `# STATUS DO PROJETO: ${project.name}
 **Última atualização:** ${new Date().toISOString()}
 **Etapa atual do fluxo:** ${currentStage}
 **Progresso das Tarefas:** ${completedCount}/${totalCount} concluídas (${totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0}%)
 
-## Lista de Tarefas
-${taskLines || 'Nenhuma tarefa cadastrada ainda.'}
+## Leva 1 — Protótipo visual
+${prototypeLines}
+
+## Leva 2 — Funcional
+${functionalLines}
 `;
 }
 
@@ -799,13 +979,13 @@ export function parseStatusMd(content: string): { completedCodes: Set<string>; p
   for (const line of lines) {
     const trimmed = line.trim();
     // Format: - [x] T001 ... or - [ ] T001 ...
-    const matchCompleted = trimmed.match(/^-\s*\[([xX])\]\s*(T\d{3})/i);
-    const matchPending = trimmed.match(/^-\s*\[\s*\]\s*(T\d{3})/i);
+    const matchCompleted = trimmed.match(/^-\s*\[([xX])\]\s*(T\d{3,4})/i);
+    const matchPending = trimmed.match(/^-\s*\[\s*\]\s*(T\d{3,4})/i);
 
     if (matchCompleted && matchCompleted[2]) {
       completedCodes.add(matchCompleted[2].toUpperCase());
-    } else if (matchPending && matchPending[2]) {
-      pendingCodes.add(matchPending[2].toUpperCase());
+    } else if (matchPending && matchPending[1]) {
+      pendingCodes.add(matchPending[1].toUpperCase());
     }
   }
 
@@ -850,13 +1030,12 @@ npm run lint
 npm run build
 \`\`\`
 
-## 6. Fluxo de Trabalho Obrigatório do Agente
-1. **Leia \`STATUS.md\`** para identificar a próxima tarefa com checkbox pendente \`- [ ]\`.
-2. **Abra o arquivo da tarefa** em \`docs/tasks/.../T00X.md\` e leia todas as restrições e critérios de aceite.
-3. **Execute a tarefa** alterando estritamente os arquivos autorizados.
-4. **Rode a verificação** indicada na seção "Como verificar" do documento da tarefa.
-5. **Marque a tarefa em \`STATUS.md\`** alterando a linha para \`- [x] T00X\`.
-6. **PARE e aguarde a revisão humana** antes de iniciar a próxima tarefa. Nunca execute múltiplas tarefas em lote sem autorização explícita.
+## 6. Fluxo de Trabalho
+1. Leia STATUS.md e pegue a próxima tarefa pendente cujas dependências estejam concluídas.
+2. Rode o planejamento da tarefa (/plan T00X no Claude Code, ou siga docs/workflow/plan.md em outras ferramentas).
+3. Aguarde revisão humana do plano.
+4. Rode a execução (/execute T00X, ou siga docs/workflow/execute.md).
+5. Nunca execute mais de uma tarefa sem autorização.
 `;
 }
 

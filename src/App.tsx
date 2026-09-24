@@ -23,6 +23,7 @@ const MainLayout: React.FC = () => {
     activeStageId,
     updateStageDocument,
     updateFeature,
+    updateFeaturePages,
     updateTask,
     selectedFeatureId,
     selectedTaskId,
@@ -56,10 +57,33 @@ const MainLayout: React.FC = () => {
       const stageState = project.stages[activeStageId];
       const contextDocs = getApprovedDocsContext();
 
+      // Special handling for Stage 5: Screens (Pages -> Components -> Behaviors)
+      if (activeStageId === 'screens') {
+        if (!currentFeature) throw new Error('Nenhuma feature selecionada para gerar telas');
+        const pagesRes = await fetch('/api/generate-pages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            featureTitle: currentFeature.title,
+            featureSlug: currentFeature.slug,
+            featureSpec: currentFeature.specMarkdown,
+            contextDocs,
+          }),
+        });
+        if (!pagesRes.ok) throw new Error('Falha ao gerar páginas da feature');
+        const { pages } = await pagesRes.json();
+        if (Array.isArray(pages) && pages.length > 0) {
+          updateFeaturePages(currentFeature.id, pages);
+        }
+        addChatMessage(activeStageId, {
+          role: 'model',
+          text: `Páginas e componentes gerados com sucesso para a feature **${currentFeature.title}**! O telas.md foi compilado automaticamente pelo código na hierarquia Página → Componentes → Comportamentos.`,
+        });
+        return;
+      }
+
       let itemContext: any = null;
       if (activeStageId === 'features') {
-        itemContext = currentFeature;
-      } else if (activeStageId === 'screens') {
         itemContext = currentFeature;
       } else if (activeStageId === 'tasks') {
         itemContext = currentTask;
@@ -104,8 +128,6 @@ const MainLayout: React.FC = () => {
       // Apply markdown to corresponding target
       if (activeStageId === 'features' && currentFeature) {
         updateFeature(currentFeature.id, { specMarkdown: markdown });
-      } else if (activeStageId === 'screens' && currentFeature) {
-        updateFeature(currentFeature.id, { screensMarkdown: markdown });
       } else if (activeStageId === 'tasks' && currentTask) {
         updateTask(currentTask.id, { markdown });
       } else {

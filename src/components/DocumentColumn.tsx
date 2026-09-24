@@ -17,10 +17,12 @@ import {
   AlertTriangle,
   FolderOpen,
   Monitor,
+  Code2,
 } from 'lucide-react';
 import { useProject } from '../context/ProjectContext';
 import { MarkdownDocPreview } from './MarkdownDocPreview';
 import { WireframePreview } from './WireframePreview';
+import { ScreensManager } from './ScreensManager';
 import { STAGES_LIST, StageId, FeatureItem, TaskItem } from '../types/spec';
 
 interface DocumentColumnProps {
@@ -43,6 +45,7 @@ export const DocumentColumn: React.FC<DocumentColumnProps> = ({
     selectedTaskId,
     setSelectedTaskId,
     updateFeature,
+    updateFeaturePages,
     addFeature,
     removeFeature,
     reorderFeatures,
@@ -54,7 +57,9 @@ export const DocumentColumn: React.FC<DocumentColumnProps> = ({
     getApprovedDocsContext,
   } = useProject();
 
-  const [activeTab, setActiveTab] = useState<'preview' | 'edit' | 'wireframe'>('preview');
+  const [activeTab, setActiveTab] = useState<'screens_hierarchy' | 'preview' | 'edit' | 'wireframe'>(
+    activeStageId === 'screens' ? 'screens_hierarchy' : 'preview'
+  );
   const [localEditContent, setLocalEditContent] = useState('');
   const [isProposingFeatures, setIsProposingFeatures] = useState(false);
   const [isBreakingDownTasks, setIsBreakingDownTasks] = useState(false);
@@ -63,6 +68,15 @@ export const DocumentColumn: React.FC<DocumentColumnProps> = ({
   const stageState = project.stages[activeStageId];
   const stageInfo = STAGES_LIST.find((s) => s.id === activeStageId)!;
   const isCompleted = stageState?.status === 'completed';
+
+  // Automatically switch tab when stage changes
+  useEffect(() => {
+    if (activeStageId === 'screens') {
+      setActiveTab('screens_hierarchy');
+    } else {
+      setActiveTab('preview');
+    }
+  }, [activeStageId]);
 
   // Determine current active document content and path
   let currentDocContent = '';
@@ -162,11 +176,12 @@ export const DocumentColumn: React.FC<DocumentColumnProps> = ({
     }
   };
 
-  // Stage 6: Break down tasks with Gemini
+  // Stage 6: Break down tasks with Gemini in two levas (prototype + functional)
   const handleBreakdownTasks = async () => {
     if (!currentFeature) return;
     try {
       setIsBreakingDownTasks(true);
+      const contextDocs = getApprovedDocsContext();
       const res = await fetch('/api/breakdown-tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -174,16 +189,19 @@ export const DocumentColumn: React.FC<DocumentColumnProps> = ({
           featureSlug: currentFeature.slug,
           featureTitle: currentFeature.title,
           featureSpec: currentFeature.specMarkdown,
-          startIndex: project.tasks.length + 1,
+          pages: currentFeature.pages || [],
+          architectureDoc: project.stages.architecture?.documentContent || contextDocs['docs/02-arquitetura.md'],
+          adrsDocs: project.adrs,
+          screensDoc: currentFeature.screensMarkdown || contextDocs[`docs/specs/${currentFeature.slug}/telas.md`],
+          contextDocs,
         }),
       });
       if (!res.ok) throw new Error('Falha ao detalhar tarefas');
       const { tasks } = await res.json();
       if (Array.isArray(tasks) && tasks.length > 0) {
-        // Append or replace for this feature
         const otherTasks = project.tasks.filter((t) => t.featureSlug !== currentFeature.slug);
-        const newTasksList = [...otherTasks, ...tasks];
-        setTasksList(newTasksList);
+        const combined = [...otherTasks, ...tasks];
+        setTasksList(combined);
       }
     } catch (err) {
       console.error(err);
@@ -192,6 +210,10 @@ export const DocumentColumn: React.FC<DocumentColumnProps> = ({
       setIsBreakingDownTasks(false);
     }
   };
+
+  // Group tasks into two levas
+  const prototypeTasks = project.tasks.filter((t) => t.kind === 'prototype');
+  const functionalTasks = project.tasks.filter((t) => t.kind !== 'prototype');
 
   return (
     <div className="flex h-full flex-col border-l border-slate-800 bg-slate-950">
@@ -314,14 +336,9 @@ export const DocumentColumn: React.FC<DocumentColumnProps> = ({
                 <Layout className="h-3.5 w-3.5 text-indigo-400" />
                 Selecione a Feature para Telas:
               </span>
-              <button
-                onClick={handleGenerateWireframe}
-                disabled={isGeneratingWireframe || !currentFeature}
-                className="flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300"
-              >
-                <Monitor className="h-3 w-3" />
-                {isGeneratingWireframe ? 'Gerando...' : 'Gerar Wireframe'}
-              </button>
+              <span className="text-[10px] text-slate-400">
+                {currentFeature?.pages?.length || 0} página(s) mapeada(s)
+              </span>
             </div>
 
             <div className="flex gap-1.5 overflow-x-auto pb-1">
@@ -343,69 +360,154 @@ export const DocumentColumn: React.FC<DocumentColumnProps> = ({
           </div>
         )}
 
-        {/* Multi-Item bar for Stage 6 (Tasks) */}
+        {/* Multi-Item bar for Stage 6 (Tasks) — Grouped into Leva 1 and Leva 2 */}
         {activeStageId === 'tasks' && (
-          <div className="mt-2 rounded-lg border border-slate-800 bg-slate-900/60 p-2">
-            <div className="flex items-center justify-between mb-1.5 text-[11px]">
-              <span className="font-semibold text-slate-300 flex items-center gap-1">
+          <div className="mt-2 rounded-lg border border-slate-800 bg-slate-900/60 p-2.5 space-y-2">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-semibold text-slate-200 flex items-center gap-1.5">
                 <CheckSquare className="h-3.5 w-3.5 text-indigo-400" />
-                Tarefas Atômicas ({project.tasks.length})
+                Tarefas em Duas Levas ({project.tasks.length})
               </span>
-              <button
-                onClick={handleBreakdownTasks}
-                disabled={isBreakingDownTasks}
-                className="flex items-center gap-1 text-[11px] text-indigo-300 hover:text-indigo-200"
-              >
-                <Sparkles className="h-3 w-3" />
-                {isBreakingDownTasks ? 'Decompondo...' : 'Decompor com Gemini'}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleBreakdownTasks}
+                  disabled={isBreakingDownTasks || !currentFeature}
+                  className="flex items-center gap-1 text-[11px] font-semibold text-indigo-300 hover:text-indigo-200 transition"
+                  title="Gera tarefas atômicas divididas em Leva 1 (Protótipo visual) e Leva 2 (Funcional) para a feature selecionada"
+                >
+                  <Sparkles className={`h-3 w-3 ${isBreakingDownTasks ? 'animate-spin' : ''}`} />
+                  {isBreakingDownTasks ? 'Decompondo...' : 'Decompor com Gemini'}
+                </button>
+
+                <button
+                  onClick={() => {
+                    const title = window.prompt('Título da nova tarefa atômica:', 'Nova tarefa');
+                    if (title) {
+                      const isProto = window.confirm('Esta tarefa é da Leva 1 (Protótipo visual)? Clique OK para Protótipo ou Cancelar para Funcional.');
+                      const kind = isProto ? 'prototype' : 'functional';
+                      const featureSlug = currentFeature?.slug || '001-feature';
+                      const tempCode = 'T999';
+                      const markdown = `# ${tempCode} — ${title}
+**Feature:** ${featureSlug} | **Refs:** RF-01
+**Tipo:** ${kind === 'prototype' ? 'Protótipo visual' : 'Funcional'}
+**Depende de:** ${kind === 'prototype' ? 'Nenhuma (tarefa inicial)' : 'T001'}
+
+## Objetivo
+Objetivo da tarefa.
+
+## Arquivos prováveis (confirmar no /plan)
+- src/...
+
+## Ação → Resultado esperado
+| Ação | Resultado esperado |
+| --- | --- |
+| Implementar | Sucesso |
+
+## Critérios de aceite
+- [ ] Critério 1
+
+## Como verificar
+npm test
+
+## Fora de escopo
+Nada extra.
+
+## Plano de implementação
+_A ser preenchido pelo comando /plan dentro da IDE._
+`;
+                      addTask({
+                        id: 'task-' + Date.now(),
+                        code: tempCode,
+                        featureSlug,
+                        title,
+                        objective: 'Objetivo da tarefa',
+                        files: ['src/...'],
+                        refs: ['RF-01'],
+                        kind,
+                        dependsOn: kind === 'prototype' ? [] : ['T001'],
+                        actions: [{ action: 'Implementar', expectedResult: 'Sucesso' }],
+                        acceptanceCriteria: ['Critério 1'],
+                        howToVerify: 'npm test',
+                        outOfScope: 'Nada extra',
+                        markdown,
+                        completed: false,
+                      });
+                    }
+                  }}
+                  className="flex shrink-0 items-center gap-1 rounded border border-dashed border-slate-700 px-2 py-0.5 text-xs text-slate-300 hover:border-slate-500 hover:text-white"
+                >
+                  <Plus className="h-3 w-3" />
+                  Nova
+                </button>
+              </div>
             </div>
 
-            <div className="flex gap-1.5 overflow-x-auto pb-1">
-              {project.tasks.map((task) => (
-                <button
-                  key={task.id}
-                  onClick={() => setSelectedTaskId(task.id)}
-                  className={`flex shrink-0 items-center gap-1.5 rounded px-2.5 py-1 text-xs transition font-mono ${
-                    selectedTaskId === task.id
-                      ? 'bg-emerald-600 text-white font-bold'
-                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
-                  }`}
-                >
-                  <span>{task.code}</span>
-                  <span className="font-sans font-normal truncate max-w-[100px]">{task.title}</span>
-                </button>
-              ))}
+            {/* Leva 1 — Protótipo visual */}
+            <div className="rounded bg-slate-950/60 p-2 border border-slate-800/80">
+              <div className="flex items-center justify-between mb-1.5 text-[10px] font-bold uppercase tracking-wider text-cyan-400">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-cyan-400"></span>
+                  Leva 1 — Protótipo visual ({prototypeTasks.length})
+                </span>
+                <span className="text-[9px] font-normal text-slate-500">1 por página • sem banco/API</span>
+              </div>
+              {prototypeTasks.length === 0 ? (
+                <div className="text-[11px] text-slate-500 italic py-1">Nenhuma tarefa de protótipo gerada.</div>
+              ) : (
+                <div className="flex gap-1.5 overflow-x-auto pb-1">
+                  {prototypeTasks.map((task) => (
+                    <button
+                      key={task.id}
+                      onClick={() => setSelectedTaskId(task.id)}
+                      className={`flex shrink-0 items-center gap-1.5 rounded px-2.5 py-1 text-xs transition border ${
+                        selectedTaskId === task.id
+                          ? 'bg-cyan-950/80 border-cyan-500 text-white font-bold'
+                          : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-800'
+                      }`}
+                    >
+                      <span className="font-mono text-cyan-400 font-semibold">{task.code}</span>
+                      <span className="rounded bg-cyan-950 text-cyan-300 border border-cyan-800/50 px-1 py-0.2 text-[9px] font-bold">
+                        Protótipo
+                      </span>
+                      <span className="truncate max-w-[120px]">{task.title}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
-              <button
-                onClick={() => {
-                  const code = `T${String(project.tasks.length + 1).padStart(3, '0')}`;
-                  const title = window.prompt(`Título da tarefa ${code}:`, 'Nova tarefa atômica');
-                  if (title) {
-                    const featureSlug = currentFeature?.slug || '001-feature';
-                    const markdown = `# ${code} — ${title}\n**Feature:** ${featureSlug} | **Refs:** RF-01\n\n## Objetivo\nObjetivo aqui.\n\n## Arquivos que pode criar/alterar\n- src/...\n\n## Ação → Resultado esperado\n| Ação | Resultado esperado |\n| --- | --- |\n| Implementar | Sucesso |\n\n## Critérios de aceite\n- [ ] Critério 1\n\n## Como verificar\nnpm test\n\n## Fora de escopo\nNada extra.`;
-                    addTask({
-                      id: 'task-' + Date.now(),
-                      code,
-                      featureSlug,
-                      title,
-                      objective: 'Objetivo da tarefa',
-                      files: ['src/...'],
-                      refs: ['RF-01'],
-                      actions: [{ action: 'Implementar', expectedResult: 'Sucesso' }],
-                      acceptanceCriteria: ['Critério 1'],
-                      howToVerify: 'npm test',
-                      outOfScope: 'Nada extra',
-                      markdown,
-                      completed: false,
-                    });
-                  }
-                }}
-                className="flex shrink-0 items-center gap-1 rounded border border-dashed border-slate-700 px-2 py-1 text-xs text-slate-400 hover:border-slate-500 hover:text-slate-200"
-              >
-                <Plus className="h-3 w-3" />
-                Nova Tarefa
-              </button>
+            {/* Leva 2 — Funcional */}
+            <div className="rounded bg-slate-950/60 p-2 border border-slate-800/80">
+              <div className="flex items-center justify-between mb-1.5 text-[10px] font-bold uppercase tracking-wider text-purple-400">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-purple-400"></span>
+                  Leva 2 — Funcional ({functionalTasks.length})
+                </span>
+                <span className="text-[9px] font-normal text-slate-500">comportamentos reais • depende do protótipo</span>
+              </div>
+              {functionalTasks.length === 0 ? (
+                <div className="text-[11px] text-slate-500 italic py-1">Nenhuma tarefa funcional gerada.</div>
+              ) : (
+                <div className="flex gap-1.5 overflow-x-auto pb-1">
+                  {functionalTasks.map((task) => (
+                    <button
+                      key={task.id}
+                      onClick={() => setSelectedTaskId(task.id)}
+                      className={`flex shrink-0 items-center gap-1.5 rounded px-2.5 py-1 text-xs transition border ${
+                        selectedTaskId === task.id
+                          ? 'bg-purple-950/80 border-purple-500 text-white font-bold'
+                          : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-800'
+                      }`}
+                    >
+                      <span className="font-mono text-purple-400 font-semibold">{task.code}</span>
+                      <span className="rounded bg-purple-950 text-purple-300 border border-purple-800/50 px-1 py-0.2 text-[9px] font-bold">
+                        Funcional
+                      </span>
+                      <span className="truncate max-w-[120px]">{task.title}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -413,41 +515,67 @@ export const DocumentColumn: React.FC<DocumentColumnProps> = ({
         {/* Tab switcher */}
         <div className="mt-2 flex items-center justify-between border-t border-slate-800/80 pt-2">
           <div className="flex gap-1 rounded bg-slate-900 p-0.5">
-            <button
-              onClick={() => setActiveTab('preview')}
-              className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition ${
-                activeTab === 'preview'
-                  ? 'bg-slate-800 text-white shadow'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Eye className="h-3.5 w-3.5" />
-              Preview Renderizado
-            </button>
-            <button
-              onClick={() => setActiveTab('edit')}
-              className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition ${
-                activeTab === 'edit'
-                  ? 'bg-slate-800 text-white shadow'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Edit3 className="h-3.5 w-3.5" />
-              Editar Markdown
-            </button>
-
-            {activeStageId === 'screens' && (
-              <button
-                onClick={() => setActiveTab('wireframe')}
-                className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition ${
-                  activeTab === 'wireframe'
-                    ? 'bg-slate-800 text-white shadow'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <Monitor className="h-3.5 w-3.5" />
-                Wireframe Interativo
-              </button>
+            {activeStageId === 'screens' ? (
+              <>
+                <button
+                  onClick={() => setActiveTab('screens_hierarchy')}
+                  className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition ${
+                    activeTab === 'screens_hierarchy'
+                      ? 'bg-slate-800 text-white shadow'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Layout className="h-3.5 w-3.5 text-emerald-400" />
+                  Páginas, Componentes & Wireframe
+                </button>
+                <button
+                  onClick={() => setActiveTab('preview')}
+                  className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition ${
+                    activeTab === 'preview'
+                      ? 'bg-slate-800 text-white shadow'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <FileText className="h-3.5 w-3.5 text-slate-300" />
+                  Documento telas.md
+                </button>
+                <button
+                  onClick={() => setActiveTab('edit')}
+                  className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition ${
+                    activeTab === 'edit'
+                      ? 'bg-slate-800 text-white shadow'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Edit3 className="h-3.5 w-3.5" />
+                  Editar telas.md
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setActiveTab('preview')}
+                  className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition ${
+                    activeTab === 'preview'
+                      ? 'bg-slate-800 text-white shadow'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  Preview Renderizado
+                </button>
+                <button
+                  onClick={() => setActiveTab('edit')}
+                  className={`flex items-center gap-1.5 rounded px-3 py-1 text-xs font-medium transition ${
+                    activeTab === 'edit'
+                      ? 'bg-slate-800 text-white shadow'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Edit3 className="h-3.5 w-3.5" />
+                  Editar Markdown
+                </button>
+              </>
             )}
           </div>
 
@@ -459,7 +587,13 @@ export const DocumentColumn: React.FC<DocumentColumnProps> = ({
 
       {/* Tab Content */}
       <div className="flex-1 overflow-y-auto p-4 bg-slate-900/60">
-        {activeTab === 'wireframe' ? (
+        {activeStageId === 'screens' && activeTab === 'screens_hierarchy' && currentFeature ? (
+          <ScreensManager
+            feature={currentFeature}
+            onUpdatePages={(pages) => updateFeaturePages(currentFeature.id, pages)}
+            contextDocs={getApprovedDocsContext()}
+          />
+        ) : activeTab === 'wireframe' ? (
           <WireframePreview
             html={currentFeature?.wireframeHtml || ''}
             onRegenerate={handleGenerateWireframe}
@@ -482,7 +616,7 @@ export const DocumentColumn: React.FC<DocumentColumnProps> = ({
           <div className="space-y-6">
             <MarkdownDocPreview content={localEditContent} />
 
-            {/* In stage 5 (Screens), also show wireframe below doc in Preview! */}
+            {/* In stage 5 (Screens), also show wireframe below doc in Preview if generated on feature */}
             {activeStageId === 'screens' && currentFeature?.wireframeHtml && (
               <div className="mt-6 border-t border-slate-800 pt-6">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-2">

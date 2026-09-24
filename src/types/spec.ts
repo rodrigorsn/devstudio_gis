@@ -19,6 +19,29 @@ export interface ChatMessage {
   isReadyToGenerate?: boolean;
 }
 
+export interface BehaviorItem {
+  id?: string;
+  trigger: string; // o que o usuário faz
+  expectedResult: string;
+  errorCase?: string;
+}
+
+export interface ComponentItem {
+  id: string;
+  name: string;
+  description: string;
+  behaviors: BehaviorItem[];
+}
+
+export interface PageItem {
+  id: string;
+  name: string;
+  route: string;
+  purpose: string;
+  components: ComponentItem[];
+  wireframeHtml?: string;
+}
+
 export interface FeatureItem {
   id: string;
   slug: string;
@@ -28,11 +51,22 @@ export interface FeatureItem {
   specMarkdown?: string;
   screensMarkdown?: string;
   wireframeHtml?: string;
+  pages?: PageItem[];
 }
 
 export interface TaskAction {
   action: string;
   expectedResult: string;
+}
+
+export type TaskKind = 'prototype' | 'functional';
+
+export interface SkillItem {
+  slug: string;
+  name: string;
+  description: string;
+  globs: string;
+  content: string;
 }
 
 export interface TaskItem {
@@ -43,6 +77,8 @@ export interface TaskItem {
   objective: string;
   files: string[];
   refs: string[];
+  kind: TaskKind;
+  dependsOn: string[];
   actions: TaskAction[];
   acceptanceCriteria: string[];
   howToVerify: string;
@@ -72,6 +108,8 @@ export interface ProjectData {
   id: string;
   name: string;
   summary?: string;
+  agentsMd?: string;
+  skills?: SkillItem[];
   createdAt: number;
   updatedAt: number;
   stages: Record<StageId, StageState>;
