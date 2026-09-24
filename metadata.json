@@ -1,0 +1,7 @@
+{
+  "name": "Spec Studio",
+  "description": "Ferramenta visual de planejamento de software com IA (Spec-Driven Development)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
